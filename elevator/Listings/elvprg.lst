@@ -1,0 +1,197 @@
+C51 COMPILER V9.59.0.0   ELVPRG                                                            06/28/2025 11:41:50 PAGE 1   
+
+
+C51 COMPILER V9.59.0.0, COMPILATION OF MODULE ELVPRG
+OBJECT MODULE PLACED IN .\Objects\elvprg.obj
+COMPILER INVOKED BY: C:\Keil_v5\C51\BIN\C51.EXE elvprg.c OPTIMIZE(8,SPEED) BROWSE DEBUG OBJECTEXTEND PRINT(.\Listings\el
+                    -vprg.lst) TABS(2) OBJECT(.\Objects\elvprg.obj)
+
+line level    source
+
+   1          #include <reg51.h>
+   2          #include <intrins.h>
+   3          
+   4          #define STEPPER P3
+   5          #define BCD_OUT P2
+   6          
+   7          // Floor button inputs
+   8          sbit FLOOR0 = P1^3;
+   9          sbit FLOOR1 = P1^2;
+  10          sbit FLOOR2 = P1^1;
+  11          sbit FLOOR3 = P1^0;
+  12          sbit EMERGENCY = P1^7; // Emergency stop button
+  13          
+  14          // Outputs
+  15          sbit DOOR_MOTOR1 = P1^4;  // Door motor control pin 1
+  16          sbit DOOR_MOTOR2 = P1^5;  // Door motor control pin 2
+  17          
+  18          // LED indicators
+  19          sbit EMERGENCY_LED = P2^5; // Blinking LED for emergency
+  20          sbit GREEN_LED     = P2^6; // Green LED for door open
+  21          sbit RED_LED       = P2^7; // Red LED for door closed
+  22          
+  23          unsigned char steps[] = {0x09, 0x0C, 0x06, 0x03};
+  24          unsigned char current_floor = 0;
+  25          unsigned char floor_display = 0;
+  26          bit dir;
+  27          unsigned int step_count = 0;
+  28          unsigned int steps_per_floor = 200;
+  29          unsigned char step_index = 0;
+  30          unsigned int total_steps = 0;
+  31          bit emergency_stop = 0;
+  32          
+  33          // ~1ms delay
+  34          void delay(unsigned int ms) {
+  35   1          unsigned int i, j;
+  36   1          for (i = 0; i < ms; i++)
+  37   1              for (j = 0; j < 1275; j++);
+  38   1      }
+  39          
+  40          // Open door using DC motor
+  41          void open_door() {
+  42   1          unsigned int i;
+  43   1          GREEN_LED = 1;  // Turn ON green LED
+  44   1          RED_LED = 0;    // Turn OFF red LED
+  45   1      
+  46   1          for (i = 0; i < 120; i++) {
+  47   2              if (emergency_stop) break;
+  48   2              DOOR_MOTOR1 = 1;
+  49   2              DOOR_MOTOR2 = 0;
+  50   2              delay(10);
+  51   2          }
+  52   1          DOOR_MOTOR1 = 0;
+  53   1          DOOR_MOTOR2 = 0;
+  54   1      }
+C51 COMPILER V9.59.0.0   ELVPRG                                                            06/28/2025 11:41:50 PAGE 2   
+
+  55          
+  56          // Close door using DC motor
+  57          void close_door() {
+  58   1          unsigned int i;
+  59   1          GREEN_LED = 0;  // Turn OFF green LED
+  60   1          RED_LED = 1;    // Turn ON red LED
+  61   1      
+  62   1          for (i = 0; i < 120; i++) {
+  63   2              if (emergency_stop) break;
+  64   2              DOOR_MOTOR1 = 0;
+  65   2              DOOR_MOTOR2 = 1;
+  66   2              delay(10);
+  67   2          }
+  68   1          DOOR_MOTOR1 = 0;
+  69   1          DOOR_MOTOR2 = 0;
+  70   1      }
+  71          
+  72          // Stepper motor control
+  73          void step_one(bit direction, unsigned char step_index_local) {
+  74   1          if (direction)
+  75   1              STEPPER = steps[step_index_local];
+  76   1          else
+  77   1              STEPPER = steps[3 - step_index_local];
+  78   1          delay(5);
+  79   1      }
+  80          
+  81          // Elevator movement
+  82          void go_to_floor(unsigned char target_floor) {
+  83   1          if (target_floor == current_floor) return;
+  84   1      
+  85   1          total_steps = (target_floor > current_floor ?
+  86   1                         target_floor - current_floor :
+  87   1                         current_floor - target_floor) * steps_per_floor;
+  88   1      
+  89   1          dir = (target_floor > current_floor);
+  90   1          step_index = 0;
+  91   1          step_count = 0;
+  92   1          floor_display = current_floor;
+  93   1      
+  94   1          while (step_count < total_steps) {
+  95   2              if (EMERGENCY == 0) {
+  96   3                  emergency_stop = 1;
+  97   3                  break;
+  98   3              }
+  99   2      
+ 100   2              step_one(dir, step_index);
+ 101   2              step_index = (step_index + 1) % 4;
+ 102   2              step_count++;
+ 103   2      
+ 104   2              if ((step_count % steps_per_floor) == 0) {
+ 105   3                  floor_display = dir ? floor_display + 1 : floor_display - 1;
+ 106   3                  BCD_OUT = floor_display;
+ 107   3              }
+ 108   2          }
+ 109   1      
+ 110   1          if (!emergency_stop) {
+ 111   2              current_floor = target_floor;
+ 112   2              STEPPER = 0x00;
+ 113   2      
+ 114   2              // Arrival actions
+ 115   2              BCD_OUT = current_floor;
+ 116   2              open_door();
+C51 COMPILER V9.59.0.0   ELVPRG                                                            06/28/2025 11:41:50 PAGE 3   
+
+ 117   2              delay(1000); // 1-second delay between open and close
+ 118   2              close_door();
+ 119   2          } else {
+ 120   2              // Emergency occurred mid-travel
+ 121   2              current_floor = floor_display;
+ 122   2              BCD_OUT = current_floor;
+ 123   2              STEPPER = 0x00;
+ 124   2          }
+ 125   1      }
+ 126          
+ 127          void main() {
+ 128   1          BCD_OUT = 0x00;
+ 129   1          DOOR_MOTOR1 = 0;
+ 130   1          DOOR_MOTOR2 = 0;
+ 131   1          GREEN_LED = 0;
+ 132   1          RED_LED = 1;       // Assume door is initially closed
+ 133   1          EMERGENCY_LED = 0;
+ 134   1          emergency_stop = 0;
+ 135   1      
+ 136   1          while (1) {
+ 137   2              // Emergency mode: blink LED and stop everything
+ 138   2              if (EMERGENCY == 0) {
+ 139   3                  emergency_stop = 1;
+ 140   3                  STEPPER = 0x00;
+ 141   3                  DOOR_MOTOR1 = 0;
+ 142   3                  DOOR_MOTOR2 = 0;
+ 143   3      
+ 144   3                  // Blink emergency LED until emergency is released
+ 145   3                  while (EMERGENCY == 0) {
+ 146   4                      EMERGENCY_LED = 1;
+ 147   4                      delay(200);
+ 148   4                      EMERGENCY_LED = 0;
+ 149   4                      delay(200);
+ 150   4                  }
+ 151   3      
+ 152   3                  emergency_stop = 0;
+ 153   3                  EMERGENCY_LED = 0;  // Stop blinking after emergency clears
+ 154   3                  continue;
+ 155   3              }
+ 156   2      
+ 157   2              emergency_stop = 0;
+ 158   2      
+ 159   2              // Floor button handling
+ 160   2              if (FLOOR0 == 0) { delay(20); if (FLOOR0 == 0) { go_to_floor(0); while (FLOOR0 == 0); } }
+ 161   2              if (FLOOR1 == 0) { delay(20); if (FLOOR1 == 0) { go_to_floor(1); while (FLOOR1 == 0); } }
+ 162   2              if (FLOOR2 == 0) { delay(20); if (FLOOR2 == 0) { go_to_floor(2); while (FLOOR2 == 0); } }
+ 163   2              if (FLOOR3 == 0) { delay(20); if (FLOOR3 == 0) { go_to_floor(3); while (FLOOR3 == 0); } }
+ 164   2      
+ 165   2              BCD_OUT = current_floor;
+ 166   2          }
+ 167   1      }
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =    437    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =   ----    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =     13       2
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =      2       1
+END OF MODULE INFORMATION.
+
+C51 COMPILER V9.59.0.0   ELVPRG                                                            06/28/2025 11:41:50 PAGE 4   
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)
